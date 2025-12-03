@@ -1,5 +1,4 @@
 import base64
-import io
 from typing import Dict, List
 
 import cv2
@@ -72,59 +71,6 @@ def create_color_sample(hue_std: float, bstar_std: float, size: int = 140) -> np
     hsv_img[:, :, 2] = int(val * 2.55)
 
     return cv2.cvtColor(hsv_img, cv2.COLOR_HSV2BGR)
-
-
-def draw_histograms(h_vals: np.ndarray, b_vals: np.ndarray) -> str | None:
-    """Gambar histogram Hue dan b* dengan OpenCV lalu kembalikan base64 PNG."""
-    if h_vals.size == 0 or b_vals.size == 0:
-        return None
-
-    # Setup kanvas
-    hist_img = np.full((240, 660, 3), 255, dtype=np.uint8)
-    margin_x = 30
-    margin_y = 30
-    plot_w = 300
-    plot_h = 180
-
-    def draw_one(data, bins, range_max, color, x_offset, title, mean_val):
-        hist, _ = np.histogram(data, bins=bins, range=(0, range_max))
-        max_v = hist.max() if hist.max() > 0 else 1
-        pts = []
-        for i, v in enumerate(hist):
-            x = int(x_offset + margin_x + i * (plot_w / bins))
-            y = int(hist_img.shape[0] - margin_y - (v / max_v) * plot_h)
-            pts.append((x, y))
-        if len(pts) >= 2:
-            cv2.polylines(hist_img, [np.array(pts, dtype=np.int32)], False, color, 2)
-
-        # Mean line
-        mean_x = int(x_offset + margin_x + (mean_val / range_max) * plot_w)
-        cv2.line(
-            hist_img,
-            (mean_x, int(hist_img.shape[0] - margin_y)),
-            (mean_x, int(hist_img.shape[0] - margin_y - plot_h)),
-            (0, 0, 0),
-            1,
-        )
-
-        # Axis
-        base_y = int(hist_img.shape[0] - margin_y)
-        cv2.line(hist_img, (x_offset + margin_x, base_y), (x_offset + margin_x + plot_w, base_y), (0, 0, 0), 1)
-        cv2.line(
-            hist_img,
-            (x_offset + margin_x, base_y),
-            (x_offset + margin_x, base_y - plot_h),
-            (0, 0, 0),
-            1,
-        )
-
-        cv2.putText(hist_img, title, (x_offset + margin_x, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (60, 60, 60), 1)
-        cv2.putText(hist_img, f"Mean: {mean_val:.1f}", (x_offset + margin_x, base_y - plot_h - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (60, 60, 60), 1)
-
-    draw_one(h_vals, bins=50, range_max=180, color=(0, 165, 255), x_offset=0, title="Hue (0-180)", mean_val=float(h_vals.mean()))
-    draw_one(b_vals, bins=50, range_max=255, color=(0, 120, 200), x_offset=340, title="b* (0-255)", mean_val=float(b_vals.mean()))
-
-    return img_to_base64(hist_img, "bgr")
 
 
 # ==================== PIPELINE PEMROSESAN ==================== #
@@ -248,8 +194,6 @@ def process_image(file_bytes: bytes) -> Dict:
 
     # Histogram
     hist_base64 = None
-    if mask_bool.any():
-        hist_base64 = draw_histograms(H[mask_bool].flatten(), B[mask_bool].flatten())
 
     # Klasifikasi
     hue_standard = mean_hue * 2  # OpenCV Hue (0-180) -> 0-360
@@ -326,7 +270,6 @@ def process_image(file_bytes: bytes) -> Dict:
     return {
         "steps": steps,
         "metrics": metrics,
-        "hist_base64": hist_base64,
         "classification": classification,
         "color_samples": color_samples,
         "size_original": f"{img0.shape[1]}x{img0.shape[0]}",
@@ -549,13 +492,6 @@ PAGE_TEMPLATE = """
           </div>
         {% endfor %}
       </div>
-
-      {% if result.hist_base64 %}
-        <h2 class="section-title">Histogram Area Tersegmentasi</h2>
-        <div class="card hist">
-          <img src="data:image/png;base64,{{ result.hist_base64 }}" alt="Histogram Hue dan b*" />
-        </div>
-      {% endif %}
 
       <h2 class="section-title">Contoh Warna Referensi</h2>
       <div class="grid colors">
