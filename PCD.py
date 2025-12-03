@@ -3,11 +3,6 @@ import io
 from typing import Dict, List
 
 import cv2
-import matplotlib
-
-# Set backend sebelum import pyplot agar non-GUI
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 from flask import Flask, render_template_string, request
 
@@ -37,15 +32,6 @@ def img_to_base64(img: np.ndarray, color_space: str = "bgr") -> str:
     if not ok:
         raise ValueError("Gagal mengubah gambar ke PNG.")
     return base64.b64encode(buffer.tobytes()).decode("utf-8")
-
-
-def fig_to_base64(fig) -> str:
-    """Render matplotlib figure ke base64 PNG."""
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight")
-    plt.close(fig)
-    buf.seek(0)
-    return base64.b64encode(buf.read()).decode("utf-8")
 
 
 def gray_world(img_bgr: np.ndarray) -> np.ndarray:
@@ -86,6 +72,59 @@ def create_color_sample(hue_std: float, bstar_std: float, size: int = 140) -> np
     hsv_img[:, :, 2] = int(val * 2.55)
 
     return cv2.cvtColor(hsv_img, cv2.COLOR_HSV2BGR)
+
+
+def draw_histograms(h_vals: np.ndarray, b_vals: np.ndarray) -> str | None:
+    """Gambar histogram Hue dan b* dengan OpenCV lalu kembalikan base64 PNG."""
+    if h_vals.size == 0 or b_vals.size == 0:
+        return None
+
+    # Setup kanvas
+    hist_img = np.full((240, 660, 3), 255, dtype=np.uint8)
+    margin_x = 30
+    margin_y = 30
+    plot_w = 300
+    plot_h = 180
+
+    def draw_one(data, bins, range_max, color, x_offset, title, mean_val):
+        hist, _ = np.histogram(data, bins=bins, range=(0, range_max))
+        max_v = hist.max() if hist.max() > 0 else 1
+        pts = []
+        for i, v in enumerate(hist):
+            x = int(x_offset + margin_x + i * (plot_w / bins))
+            y = int(hist_img.shape[0] - margin_y - (v / max_v) * plot_h)
+            pts.append((x, y))
+        if len(pts) >= 2:
+            cv2.polylines(hist_img, [np.array(pts, dtype=np.int32)], False, color, 2)
+
+        # Mean line
+        mean_x = int(x_offset + margin_x + (mean_val / range_max) * plot_w)
+        cv2.line(
+            hist_img,
+            (mean_x, int(hist_img.shape[0] - margin_y)),
+            (mean_x, int(hist_img.shape[0] - margin_y - plot_h)),
+            (0, 0, 0),
+            1,
+        )
+
+        # Axis
+        base_y = int(hist_img.shape[0] - margin_y)
+        cv2.line(hist_img, (x_offset + margin_x, base_y), (x_offset + margin_x + plot_w, base_y), (0, 0, 0), 1)
+        cv2.line(
+            hist_img,
+            (x_offset + margin_x, base_y),
+            (x_offset + margin_x, base_y - plot_h),
+            (0, 0, 0),
+            1,
+        )
+
+        cv2.putText(hist_img, title, (x_offset + margin_x, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (60, 60, 60), 1)
+        cv2.putText(hist_img, f"Mean: {mean_val:.1f}", (x_offset + margin_x, base_y - plot_h - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (60, 60, 60), 1)
+
+    draw_one(h_vals, bins=50, range_max=180, color=(0, 165, 255), x_offset=0, title="Hue (0-180)", mean_val=float(h_vals.mean()))
+    draw_one(b_vals, bins=50, range_max=255, color=(0, 120, 200), x_offset=340, title="b* (0-255)", mean_val=float(b_vals.mean()))
+
+    return img_to_base64(hist_img, "bgr")
 
 
 # ==================== PIPELINE PEMROSESAN ==================== #
@@ -210,26 +249,7 @@ def process_image(file_bytes: bytes) -> Dict:
     # Histogram
     hist_base64 = None
     if mask_bool.any():
-        fig, axes = plt.subplots(1, 2, figsize=(11, 4))
-
-        axes[0].hist(H[mask_bool].flatten(), bins=50, color="orange", alpha=0.75)
-        axes[0].axvline(mean_hue, color="red", linestyle="--", linewidth=2, label=f"Mean: {mean_hue:.1f}")
-        axes[0].set_xlabel("Hue (OpenCV 0-180)")
-        axes[0].set_ylabel("Frekuensi")
-        axes[0].set_title("Distribusi Hue (area buah)")
-        axes[0].legend()
-        axes[0].grid(alpha=0.3)
-
-        axes[1].hist(B[mask_bool].flatten(), bins=50, color="blue", alpha=0.75)
-        axes[1].axvline(mean_bstar, color="red", linestyle="--", linewidth=2, label=f"Mean: {mean_bstar:.1f}")
-        axes[1].set_xlabel("b* (OpenCV 0-255)")
-        axes[1].set_ylabel("Frekuensi")
-        axes[1].set_title("Distribusi b* (area buah)")
-        axes[1].legend()
-        axes[1].grid(alpha=0.3)
-
-        plt.tight_layout()
-        hist_base64 = fig_to_base64(fig)
+        hist_base64 = draw_histograms(H[mask_bool].flatten(), B[mask_bool].flatten())
 
     # Klasifikasi
     hue_standard = mean_hue * 2  # OpenCV Hue (0-180) -> 0-360
