@@ -73,6 +73,74 @@ def create_color_sample(hue_std: float, bstar_std: float, size: int = 140) -> np
     return cv2.cvtColor(hsv_img, cv2.COLOR_HSV2BGR)
 
 
+def draw_histogram_image(
+    data: np.ndarray,
+    bins: int = 50,
+    width: int = 500,
+    height: int = 300,
+    color: tuple = (0, 165, 255),
+    bg: tuple = (255, 255, 255),
+    mean_val: float = None,
+    label: str = "Value",
+) -> np.ndarray:
+    """
+    Menggambar histogram dari array data ke image BGR menggunakan OpenCV.
+    - data : 1D numpy array
+    - bins : jumlah bin histogram
+    - width, height : ukuran canvas output
+    - color : warna batang histogram (B,G,R)
+    - bg : warna background canvas
+    - mean_val : nilai mean untuk garis acuan (optional)
+    - label : label sumbu X
+    Return: image BGR (np.ndarray)
+    """
+    hist, bin_edges = np.histogram(data.flatten(), bins=bins)
+    hist_max = hist.max() if hist.max() > 0 else 1
+
+    margin = 40
+    canvas = np.full((height, width, 3), bg, dtype=np.uint8)
+
+    # Area plotting
+    plot_w = width - 2 * margin
+    plot_h = height - 2 * margin
+
+    # Draw border/axis
+    cv2.rectangle(canvas, (margin, margin), (margin + plot_w, margin + plot_h), (200, 200, 200), 1)
+
+    # Draw bars
+    for i in range(bins):
+        x1 = margin + int(i * (plot_w / bins))
+        x2 = margin + int((i + 1) * (plot_w / bins))
+        h_val = int((hist[i] / hist_max) * (plot_h - 4)) if hist_max > 0 else 0
+        y1 = margin + plot_h - h_val
+        y2 = margin + plot_h
+        cv2.rectangle(canvas, (x1, y1), (x2, y2), color, -1)
+
+    # Draw mean line if provided
+    if mean_val is not None:
+        min_edge = bin_edges[0]
+        max_edge = bin_edges[-1]
+        if max_edge - min_edge != 0:
+            relative = (mean_val - min_edge) / (max_edge - min_edge)
+            mx = margin + int(relative * plot_w)
+            cv2.line(canvas, (mx, margin), (mx, margin + plot_h), (0, 0, 255), 2)
+            cv2.putText(
+                canvas,
+                f"Mean: {mean_val:.1f}",
+                (mx + 5, margin + 20),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 0, 255),
+                1,
+                cv2.LINE_AA,
+            )
+
+    # X-axis label
+    cv2.putText(canvas, label, (margin, height - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (50, 50, 50), 1, cv2.LINE_AA)
+
+    return canvas
+
+
 # ==================== PIPELINE PEMROSESAN ==================== #
 def process_image(file_bytes: bytes) -> Dict:
     """Proses gambar pisang dan kembalikan langkah-langkah, metrik, dan visualisasi."""
@@ -192,8 +260,31 @@ def process_image(file_bytes: bytes) -> Dict:
         mean_hue = std_hue = mean_bstar = std_bstar = 0.0
         pixel_count = 0
 
-    # Histogram
+    # Histogram menggunakan OpenCV (tanpa matplotlib)
     hist_base64 = None
+    if mask_bool.any():
+        H_vals = H[mask_bool].flatten()
+        B_vals = B[mask_bool].flatten()
+
+        # Gambar histogram Hue
+        hist_h_img = draw_histogram_image(
+            H_vals,
+            bins=50,
+            width=500,
+            height=300,
+            color=(0, 165, 255),
+            mean_val=mean_hue,
+            label="Hue (0-180)",
+        )
+
+        # Gambar histogram b*
+        hist_b_img = draw_histogram_image(
+            B_vals, bins=50, width=500, height=300, color=(255, 0, 0), mean_val=mean_bstar, label="b* (0-255)"
+        )
+
+        # Gabungkan horizontal
+        combined_hist = cv2.hconcat([hist_h_img, hist_b_img])
+        hist_base64 = img_to_base64(combined_hist, "bgr")
 
     # Klasifikasi
     hue_standard = mean_hue * 2  # OpenCV Hue (0-180) -> 0-360
@@ -274,6 +365,7 @@ def process_image(file_bytes: bytes) -> Dict:
         "color_samples": color_samples,
         "size_original": f"{img0.shape[1]}x{img0.shape[0]}",
         "original": steps[0],
+        "histogram": hist_base64,
     }
 
 
@@ -481,6 +573,14 @@ PAGE_TEMPLATE = """
           </div>
         </div>
       </div>
+
+      <h2 class="section-title">Histogram Hue dan b*</h2>
+      {% if result.histogram %}
+        <div class="card hist">
+          <img src="data:image/png;base64,{{ result.histogram }}" alt="Histogram Hue dan b*" />
+          <div class="muted" style="margin-top: 12px;">Distribusi warna pada area buah yang tersegmentasi. Garis merah menunjukkan nilai mean masing-masing channel.</div>
+        </div>
+      {% endif %}
 
       <h2 class="section-title">Tahapan Pemrosesan</h2>
       <div class="grid">
