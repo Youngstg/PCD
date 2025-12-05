@@ -574,14 +574,6 @@ PAGE_TEMPLATE = """
         </div>
       </div>
 
-      <h2 class="section-title">Histogram Hue dan b*</h2>
-      {% if result.histogram %}
-        <div class="card hist">
-          <img src="data:image/png;base64,{{ result.histogram }}" alt="Histogram Hue dan b*" />
-          <div class="muted" style="margin-top: 12px;">Distribusi warna pada area buah yang tersegmentasi. Garis merah menunjukkan nilai mean masing-masing channel.</div>
-        </div>
-      {% endif %}
-
       <h2 class="section-title">Tahapan Pemrosesan</h2>
       <div class="grid">
         {% for step in result.steps %}
@@ -592,6 +584,14 @@ PAGE_TEMPLATE = """
           </div>
         {% endfor %}
       </div>
+
+      <h2 class="section-title">Histogram Hue dan b*</h2>
+      {% if result.histogram %}
+        <div class="card hist">
+          <img src="data:image/png;base64,{{ result.histogram }}" alt="Histogram Hue dan b*" />
+          <div class="muted" style="margin-top: 12px;">Distribusi warna pada area buah yang tersegmentasi. Garis merah menunjukkan nilai mean masing-masing channel.</div>
+        </div>
+      {% endif %}
 
       <h2 class="section-title">Contoh Warna Referensi</h2>
       <div class="grid colors">
